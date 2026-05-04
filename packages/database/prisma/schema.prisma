@@ -1,0 +1,339 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  BUYER
+  SELLER
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  VILLA
+  LAND
+  COMMERCIAL
+  OFFICE
+  WAREHOUSE
+}
+
+enum PropertyStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  RENTED
+  UNAVAILABLE
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingType {
+  VISIT
+  RESERVATION
+}
+
+enum NotificationType {
+  BOOKING_UPDATE
+  MESSAGE
+  KYC_APPROVAL
+  LISTING_APPROVAL
+  PRICE_DROP
+  SYSTEM
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  phone         String?
+  avatar        String?
+  role          UserRole  @default(BUYER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  // Seller specific
+  sellerProfile SellerProfile?
+
+  // Relations
+  properties    Property[]
+  bookingsAsBuyer  Booking[] @relation("BuyerBookings")
+  bookingsAsSeller Booking[] @relation("SellerBookings")
+  messagesSent  Message[] @relation("SentMessages")
+  messagesReceived Message[] @relation("ReceivedMessages")
+  reviewsGiven  Review[] @relation("ReviewAuthor")
+  reviewsReceived Review[] @relation("ReviewTarget")
+  favorites     Favorite[]
+  notifications Notification[]
+  savedSearches SavedSearch[]
+
+  @@map("users")
+}
+
+model SellerProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // KYC fields
+  kycStatus       KycStatus @default(PENDING)
+  kycSubmittedAt  DateTime?
+  kycReviewedAt   DateTime?
+  kycReviewNotes  String?
+  kycReviewerId   String?
+
+  // Verification documents
+  selfieUrl       String?
+  nidFrontUrl     String?
+  nidBackUrl      String?
+  passportUrl     String?
+  addressProofUrl String?
+  videoUrl        String?
+
+  // Address
+  address         String?
+  city            String?
+  district        String?
+  division        String?
+  zipCode         String?
+
+  // Verification
+  isVerified      Boolean   @default(false)
+  verifiedAt      DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("seller_profiles")
+}
+
+model Property {
+  id              String       @id @default(cuid())
+  sellerId        String
+  seller          User         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  // Basic Info
+  title           String
+  description     String       @db.Text
+  price           Decimal      @db.Decimal(15, 2)
+  pricePerSqft    Decimal?     @db.Decimal(10, 2)
+  propertyType    PropertyType
+  status          PropertyStatus @default(AVAILABLE)
+  listingStatus   ListingStatus  @default(PENDING_APPROVAL)
+
+  // Location
+  address         String
+  city            String
+  district        String
+  division        String
+  zipCode         String?
+  latitude        Decimal?     @db.Decimal(10, 8)
+  longitude       Decimal?     @db.Decimal(11, 8)
+
+  // Details
+  bedrooms        Int?
+  bathrooms       Int?
+  sizeSqft        Int?
+  floor           Int?
+  totalFloors     Int?
+  yearBuilt       Int?
+  furnished       Boolean      @default(false)
+  parking         Boolean      @default(false)
+  amenities       String[]     @default([])
+
+  // Media
+  images          String[]     @default([])
+  videoUrl        String?
+  virtualTourUrl  String?
+  documents       String[]     @default([])
+
+  // Listing control
+  isFeatured      Boolean      @default(false)
+  featuredUntil   DateTime?
+  viewCount       Int          @default(0)
+  contactCount    Int          @default(0)
+
+  // Moderation
+  rejectionReason String?
+  moderatedBy     String?
+  moderatedAt     DateTime?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  bookings        Booking[]
+  favorites       Favorite[]
+  reviews         Review[]
+
+  @@index([sellerId])
+  @@index([city])
+  @@index([propertyType])
+  @@index([price])
+  @@index([listingStatus])
+  @@index([isFeatured])
+  @@index([latitude, longitude])
+  @@map("properties")
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  propertyId      String
+  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  buyerId         String
+  buyer           User          @relation("BuyerBookings", fields: [buyerId], references: [id], onDelete: Cascade)
+  sellerId        String
+  seller          User          @relation("SellerBookings", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  type            BookingType
+  status          BookingStatus @default(PENDING)
+
+  // Visit details
+  visitDate       DateTime?
+  visitTime       String?
+
+  // Reservation details
+  offerPrice      Decimal?      @db.Decimal(15, 2)
+  message         String?       @db.Text
+
+  // Status tracking
+  sellerResponse  String?       @db.Text
+  sellerRespondedAt DateTime?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  notifications   Notification[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  senderId    String
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  content     String   @db.Text
+  attachments String[] @default([])
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+
+  // For property context
+  propertyId  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      User     @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  targetId    String
+  target      User     @relation("ReviewTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  propertyId  String?
+  property    Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  rating      Int      // 1-5
+  comment     String?  @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([targetId])
+  @@index([propertyId])
+  @@unique([authorId, targetId, propertyId])
+  @@map("reviews")
+}
+
+model Favorite {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@map("favorites")
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  title       String
+  message     String
+  isRead      Boolean          @default(false)
+  data        Json?            // Flexible metadata
+
+  // Optional relations
+  bookingId   String?
+  booking     Booking?         @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime         @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model SavedSearch {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  filters     Json     // Stored filter configuration
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@map("saved_searches")
+}
